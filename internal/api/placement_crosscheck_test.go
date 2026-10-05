@@ -10,11 +10,11 @@ import (
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
-// acceptViaService parses a request body with the transport's strict parser
-// and then submits it through the independent business entry point.
+// acceptViaService parses a request body with the shared strict parser and
+// then submits it through the independent business entry point.
 func acceptViaService(t *testing.T, svc *service.Service, body string) (*store.Placement, service.Outcome) {
 	t.Helper()
-	p, err := parsePlacement([]byte(body))
+	p, err := service.ParsePlacementInput([]byte(body))
 	if err != nil {
 		t.Fatalf("parse %q: %v", body, err)
 	}
