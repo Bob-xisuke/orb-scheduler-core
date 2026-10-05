@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/placement"
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
@@ -23,7 +24,7 @@ func NewRouter(st *store.Store) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "database": "ok"})
 	})
 
-	h := &placementHandler{st: st}
+	h := &placementHandler{svc: placement.NewService(st), st: st}
 	router.POST("/v1/placements", h.createPlacement)
 	router.GET("/v1/placements", h.listPlacements)
 
