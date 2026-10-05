@@ -267,6 +267,74 @@ func TestAcceptConcurrentIdenticalSubmissionsStoreOneRecord(t *testing.T) {
 	}
 }
 
+// A rejected decision follows the same registration rules as a placed one:
+// same content retries to the original record, different content conflicts,
+// and neither adds nor rewrites a record — even when the new submission would
+// schedule differently.
+func TestAcceptRejectedRecordRetryAndConflictRules(t *testing.T) {
+	st, svc := newService(t)
+	rejected := &store.Placement{
+		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
+		Resources: store.Resources{CPU: 2000, Memory: 256},
+		Selector:  map[string]string{},
+		Nodes:     []store.Node{{Name: "n", CPU: 1000, Memory: 512, Labels: map[string]string{}}},
+	}
+	first, outcome, err := svc.Accept(context.Background(), rejected)
+	if err != nil || outcome != Created {
+		t.Fatalf("first: outcome=%d err=%v", outcome, err)
+	}
+	if first.Status != StatusRejected {
+		t.Fatalf("setup: want rejected, got %+v", first)
+	}
+
+	// Same content again: Identical, original record, still one row.
+	retry := &store.Placement{
+		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
+		Resources: store.Resources{CPU: 2000, Memory: 256},
+		// Defaults omitted this time: nil selector and labels are the same content.
+		Nodes: []store.Node{{Name: "n", CPU: 1000, Memory: 512}},
+	}
+	rec, outcome, err := svc.Accept(context.Background(), retry)
+	if err != nil || outcome != Identical {
+		t.Fatalf("retry: outcome=%d err=%v, want Identical", outcome, err)
+	}
+	if rec.Status != StatusRejected || rec.Node != nil || rec.Reason == nil || *rec.Reason != ReasonNoNode {
+		t.Fatalf("retry returned %+v, want the original rejection", rec)
+	}
+
+	// Different content on the same identity — this one would be placeable,
+	// so the scheduling result must not stand in for content comparison.
+	placeable := &store.Placement{
+		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
+		Resources: store.Resources{CPU: 100, Memory: 64},
+		Selector:  map[string]string{},
+		Nodes:     []store.Node{{Name: "n", CPU: 1000, Memory: 512, Labels: map[string]string{}}},
+	}
+	rec, outcome, err = svc.Accept(context.Background(), placeable)
+	if err != nil || outcome != Conflict {
+		t.Fatalf("conflict: outcome=%d err=%v, want Conflict", outcome, err)
+	}
+	if rec.Status != StatusRejected {
+		t.Fatalf("conflict must return the untouched original rejection, got %+v", rec)
+	}
+
+	// The store still holds exactly the original rejected record.
+	got, err := st.Get(context.Background(), "ns", "job")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != StatusRejected || got.Resources.CPU != 2000 {
+		t.Fatalf("stored record rewritten: %+v", got)
+	}
+	recs, err := st.List(context.Background(), store.ListFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("records = %d, want 1 after retry and conflict", len(recs))
+	}
+}
+
 func TestAcceptStorageUnavailable(t *testing.T) {
 	st, svc := newService(t)
 	if err := st.Close(); err != nil {

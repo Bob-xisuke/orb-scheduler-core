@@ -55,7 +55,10 @@ func New(st *store.Store) *Service {
 // record. Scheduling results alone do not count as equal content. Input
 // validation is expected to have happened before this call.
 func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placement, Outcome, error) {
-	normalize(p)
+	// Fill omitted-field defaults through the single shared definition so
+	// the trial, the stored record and the content comparison all see the
+	// same input. The candidate array's order is left untouched.
+	store.NormalizeInput(p)
 	p.Status, p.Node, p.Reason = schedule(p)
 
 	stored, created, err := s.st.Submit(ctx, p)
@@ -78,22 +81,4 @@ func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placem
 
 func storageError(err error) error {
 	return fmt.Errorf("accept placement: %w: %w", ErrStorageUnavailable, err)
-}
-
-// normalize fills the documented defaults so the entry point behaves the same
-// regardless of how the request was assembled: an omitted selector or node
-// labels map is an empty object. It does not touch the candidate array's
-// order, which is significant for content comparison.
-func normalize(p *store.Placement) {
-	if p.Selector == nil {
-		p.Selector = map[string]string{}
-	}
-	if p.Nodes == nil {
-		p.Nodes = []store.Node{}
-	}
-	for i := range p.Nodes {
-		if p.Nodes[i].Labels == nil {
-			p.Nodes[i].Labels = map[string]string{}
-		}
-	}
 }

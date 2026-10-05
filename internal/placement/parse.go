@@ -37,7 +37,9 @@ var ErrInvalidPlacementInput = errors.New("invalid placement input")
 // ParsePlacementInput adds the root-level rules on top of that shared walk:
 // no trailing data after the root object, every required member present, each
 // field's declared JSON type and range (null is never accepted where a value
-// is required; omitted selector/labels default to {}), and unique node names.
+// is required), and unique node names. Defaults for omitted selector/labels
+// are not a parser rule: they come from store.NormalizeInput, the single
+// definition shared with acceptance and content comparison.
 // ---------------------------------------------------------------------------
 
 var topLevelFields = map[string]bool{
@@ -62,9 +64,10 @@ var nodeFields = map[string]bool{
 // ParsePlacementInput decodes one placement request body. On success it
 // returns the complete input object, ready for service.Accept: every input
 // field keeps its submitted value, the node array keeps its order, omitted
-// selector and node labels are filled as empty objects, and an empty nodes
-// array stays an empty array. On any rule violation it returns nil and an
-// error matching errors.Is(err, ErrInvalidPlacementInput).
+// selector and node labels are filled as empty objects through the shared
+// store.NormalizeInput rules, and an empty nodes array stays an empty array.
+// On any rule violation it returns nil and an error matching
+// errors.Is(err, ErrInvalidPlacementInput).
 func ParsePlacementInput(body []byte) (*store.Placement, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 
@@ -103,12 +106,14 @@ func ParsePlacementInput(body []byte) (*store.Placement, error) {
 	if p.Nodes, err = parseNodes(fields["nodes"]); err != nil {
 		return nil, err
 	}
-	p.Selector = map[string]string{}
 	if raw, ok := fields["selector"]; ok {
 		if p.Selector, err = parseStringMap(raw); err != nil {
 			return nil, err
 		}
 	}
+	// Omitted selector/labels get their defaults from the single shared
+	// definition, not from a parser-local copy of the rules.
+	store.NormalizeInput(p)
 	return p, nil
 }
 
@@ -185,7 +190,7 @@ func parseNodes(raw json.RawMessage) ([]store.Node, error) {
 		if err != nil || memory < 0 {
 			return nil, ErrInvalidPlacementInput
 		}
-		labels := map[string]string{}
+		labels := map[string]string(nil)
 		if labelRaw, ok := obj["labels"]; ok {
 			labels, err = parseStringMap(labelRaw)
 			if err != nil {
