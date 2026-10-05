@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -39,20 +38,6 @@ type Placement struct {
 	Status    string            `json:"status"`
 	Node      *string           `json:"node"`
 	Reason    *string           `json:"reason"`
-}
-
-// inputPayload is the canonical JSON representation of the request half of a
-// record. It omits Status/Node/Reason so two submissions can be compared for
-// content equality byte-for-byte; encoding/json sorts object keys, while array
-// order is preserved.
-type inputPayload struct {
-	Namespace string            `json:"namespace"`
-	Name      string            `json:"name"`
-	Queue     string            `json:"queue"`
-	Priority  int32             `json:"priority"`
-	Resources Resources         `json:"resources"`
-	Selector  map[string]string `json:"selector"`
-	Nodes     []Node            `json:"nodes"`
 }
 
 // ErrNotFound is returned by Get when no placement matches the identity.
@@ -176,51 +161,6 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]*Placement, error) {
 		return nil, fmt.Errorf("iterate placements: %w", err)
 	}
 	return out, nil
-}
-
-// SameInput reports whether the request halves of two placements are equal
-// under the documented comparison: omitted selector/labels are treated as
-// empty objects, object member order is ignored and array order is kept.
-func SameInput(a, b *Placement) (bool, error) {
-	ab, err := canonicalInput(a)
-	if err != nil {
-		return false, err
-	}
-	bb, err := canonicalInput(b)
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(ab, bb), nil
-}
-
-func canonicalInput(p *Placement) ([]byte, error) {
-	selector := p.Selector
-	if selector == nil {
-		selector = map[string]string{}
-	}
-	nodes := p.Nodes
-	if nodes == nil {
-		nodes = []Node{}
-	}
-	for i := range nodes {
-		if nodes[i].Labels == nil {
-			nodes[i].Labels = map[string]string{}
-		}
-	}
-	in := inputPayload{
-		Namespace: p.Namespace,
-		Name:      p.Name,
-		Queue:     p.Queue,
-		Priority:  p.Priority,
-		Resources: p.Resources,
-		Selector:  selector,
-		Nodes:     nodes,
-	}
-	data, err := json.Marshal(in)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
 }
 
 func decodeRecord(inputJSON, status string, node, reason sql.NullString) (*Placement, error) {

@@ -54,8 +54,14 @@ func New(st *store.Store) *Service {
 // different content is reported as Conflict and never changes the stored
 // record. Scheduling results alone do not count as equal content. Input
 // validation is expected to have happened before this call.
+//
+// Defaulting and content comparison are not redefined here: Accept delegates
+// both to the single definition in package store (NormalizeInput and
+// SameInput), so an omitted selector or node labels map is an empty object
+// and the candidate array's order stays significant no matter how the request
+// was assembled.
 func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placement, Outcome, error) {
-	normalize(p)
+	store.NormalizeInput(p)
 	p.Status, p.Node, p.Reason = schedule(p)
 
 	stored, created, err := s.st.Submit(ctx, p)
@@ -78,22 +84,4 @@ func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placem
 
 func storageError(err error) error {
 	return fmt.Errorf("accept placement: %w: %w", ErrStorageUnavailable, err)
-}
-
-// normalize fills the documented defaults so the entry point behaves the same
-// regardless of how the request was assembled: an omitted selector or node
-// labels map is an empty object. It does not touch the candidate array's
-// order, which is significant for content comparison.
-func normalize(p *store.Placement) {
-	if p.Selector == nil {
-		p.Selector = map[string]string{}
-	}
-	if p.Nodes == nil {
-		p.Nodes = []store.Node{}
-	}
-	for i := range p.Nodes {
-		if p.Nodes[i].Labels == nil {
-			p.Nodes[i].Labels = map[string]string{}
-		}
-	}
 }
