@@ -1,8 +1,6 @@
-package store
+package model
 
 import (
-	"context"
-	"path/filepath"
 	"testing"
 )
 
@@ -62,9 +60,9 @@ func TestNormalizeInputFillsOnlyOmittedFields(t *testing.T) {
 // exactly these bytes, so the field set, JSON names and key order are pinned
 // by this test.
 func TestCanonicalInputIsStable(t *testing.T) {
-	data, err := canonicalInput(sampleInput())
+	data, err := CanonicalInput(sampleInput())
 	if err != nil {
-		t.Fatalf("canonicalInput: %v", err)
+		t.Fatalf("CanonicalInput: %v", err)
 	}
 	want := `{"namespace":"ns","name":"job","queue":"q","priority":1,` +
 		`"resources":{"cpu":100,"memory":64},"selector":{"zone":"cn"},` +
@@ -72,6 +70,43 @@ func TestCanonicalInputIsStable(t *testing.T) {
 		`{"name":"n2","cpu":100,"memory":64,"labels":{}}]}`
 	if string(data) != want {
 		t.Fatalf("canonical form changed:\n got: %s\nwant: %s", data, want)
+	}
+}
+
+// DecodeInput is the read half of the stored format: it must reproduce the
+// request fields of any record CanonicalInput wrote, regardless of member
+// order in the stored bytes, and must not invent scheduling results.
+func TestDecodeInputRoundTrip(t *testing.T) {
+	data, err := CanonicalInput(sampleInput())
+	if err != nil {
+		t.Fatalf("CanonicalInput: %v", err)
+	}
+	got, err := DecodeInput(data)
+	if err != nil {
+		t.Fatalf("DecodeInput: %v", err)
+	}
+	if same, err := SameInput(sampleInput(), got); err != nil || !same {
+		t.Fatalf("round trip changed content: same=%v err=%v", same, err)
+	}
+	if got.Status != "" || got.Node != nil || got.Reason != nil {
+		t.Fatalf("DecodeInput filled scheduling results: %+v", got)
+	}
+
+	// Member order in the stored bytes is not significant on decode.
+	scrambled := `{"nodes":[{"labels":{"zone":"cn"},"memory":128,"cpu":200,"name":"n1"},` +
+		`{"labels":{},"memory":64,"cpu":100,"name":"n2"}],` +
+		`"selector":{"zone":"cn"},"resources":{"memory":64,"cpu":100},` +
+		`"priority":1,"queue":"q","name":"job","namespace":"ns"}`
+	got, err = DecodeInput([]byte(scrambled))
+	if err != nil {
+		t.Fatalf("DecodeInput scrambled: %v", err)
+	}
+	if same, err := SameInput(sampleInput(), got); err != nil || !same {
+		t.Fatalf("scrambled decode changed content: same=%v err=%v", same, err)
+	}
+
+	if _, err := DecodeInput([]byte(`{`)); err == nil {
+		t.Fatalf("DecodeInput accepted malformed JSON")
 	}
 }
 
@@ -121,66 +156,4 @@ func TestSameInputRules(t *testing.T) {
 			t.Fatalf("same=%v err=%v, want equal when only status/node/reason differ", same, err)
 		}
 	})
-}
-
-// A row written by a pre-refactor build — same canonical fields, members in
-// any order — must still decode and take part in retry comparison.
-func TestLegacyStoredRowStillReadsAndCompares(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "legacy.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer st.Close()
-
-	// Member order scrambled relative to the canonical encoding; semantically
-	// the same content as the fresh submission below.
-	legacyJSON := `{"nodes":[{"labels":{"zone":"cn"},"memory":128,"cpu":200,"name":"n1"}],` +
-		`"selector":{"zone":"cn"},"resources":{"memory":64,"cpu":100},` +
-		`"priority":1,"queue":"q","name":"job","namespace":"ns"}`
-	if _, err := st.db.Exec(
-		"INSERT INTO placements (namespace, name, input_json, status, node, reason) VALUES (?, ?, ?, ?, ?, ?)",
-		"ns", "job", legacyJSON, "placed", "n1", nil,
-	); err != nil {
-		t.Fatalf("insert legacy row: %v", err)
-	}
-
-	ctx := context.Background()
-	got, err := st.Get(ctx, "ns", "job")
-	if err != nil {
-		t.Fatalf("get legacy record: %v", err)
-	}
-	if got.Status != "placed" || got.Node == nil || *got.Node != "n1" || got.Queue != "q" {
-		t.Fatalf("legacy record decoded wrong: %+v", got)
-	}
-
-	fresh := &Placement{
-		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: Resources{CPU: 100, Memory: 64},
-		Selector:  map[string]string{"zone": "cn"},
-		Nodes:     []Node{{Name: "n1", CPU: 200, Memory: 128, Labels: map[string]string{"zone": "cn"}}},
-	}
-	same, err := SameInput(fresh, got)
-	if err != nil || !same {
-		t.Fatalf("legacy record no longer compares equal: same=%v err=%v", same, err)
-	}
-
-	// A retry against the legacy identity must hit the unique identity and
-	// return the stored record, never insert a second row.
-	stored, created, err := st.Submit(ctx, fresh)
-	if err != nil {
-		t.Fatalf("submit retry: %v", err)
-	}
-	if created {
-		t.Fatalf("retry against legacy identity inserted a new row")
-	}
-	if same, err := SameInput(stored, got); err != nil || !same {
-		t.Fatalf("stored record changed by retry: same=%v err=%v", same, err)
-	}
-	recs, err := st.List(ctx, ListFilter{})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(recs) != 1 {
-		t.Fatalf("records = %d, want 1", len(recs))
-	}
 }

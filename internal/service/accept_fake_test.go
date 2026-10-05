@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/service/fakestore"
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
 // This suite runs the Accept business flow against the in-memory fakestore
@@ -22,11 +22,11 @@ func newFakeService() (*fakestore.Store, *Service) {
 
 func TestAcceptWithFakeFillsDefaultsBeforeStorage(t *testing.T) {
 	fake, svc := newFakeService()
-	p := &store.Placement{
+	p := &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		// Selector and node Labels omitted.
-		Nodes: []store.Node{{Name: "n", CPU: 200, Memory: 128}},
+		Nodes: []model.Node{{Name: "n", CPU: 200, Memory: 128}},
 	}
 	rec, outcome, err := svc.Accept(context.Background(), p)
 	if err != nil || outcome != Created {
@@ -53,16 +53,16 @@ func TestAcceptWithFakeSchedulingRules(t *testing.T) {
 	fake, svc := newFakeService()
 	// Eligible means labels contain every selector pair and both capacities
 	// fit. Byte order: "z-node" < "ä-node".
-	nodes := []store.Node{
+	nodes := []model.Node{
 		{Name: "ä-node", CPU: 1000, Memory: 512, Labels: map[string]string{"zone": "cn"}},
 		{Name: "z-node", CPU: 1000, Memory: 512, Labels: map[string]string{"zone": "cn"}},
 		{Name: "small", CPU: 100, Memory: 128, Labels: map[string]string{"zone": "cn"}},
 		{Name: "a-other-zone", CPU: 2000, Memory: 1024, Labels: map[string]string{"zone": "us"}},
 	}
-	mk := func(name string, priority int32) *store.Placement {
-		return &store.Placement{
+	mk := func(name string, priority int32) *model.Placement {
+		return &model.Placement{
 			Namespace: "ns", Name: name, Queue: "q", Priority: priority,
-			Resources: store.Resources{CPU: 1000, Memory: 512},
+			Resources: model.Resources{CPU: 1000, Memory: 512},
 			Selector:  map[string]string{"zone": "cn"},
 			Nodes:     nodes,
 		}
@@ -89,22 +89,22 @@ func TestAcceptWithFakeSchedulingRules(t *testing.T) {
 func TestAcceptWithFakeCreatedIdenticalConflict(t *testing.T) {
 	fake, svc := newFakeService()
 
-	first := &store.Placement{
+	first := &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		// Selector and labels omitted; the retry spells them out as {}.
-		Nodes: []store.Node{{Name: "n", CPU: 200, Memory: 128}},
+		Nodes: []model.Node{{Name: "n", CPU: 200, Memory: 128}},
 	}
 	rec1, outcome, err := svc.Accept(context.Background(), first)
 	if err != nil || outcome != Created {
 		t.Fatalf("first: outcome=%d err=%v", outcome, err)
 	}
 
-	retry := &store.Placement{
+	retry := &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{{Name: "n", CPU: 200, Memory: 128, Labels: map[string]string{}}},
+		Nodes:     []model.Node{{Name: "n", CPU: 200, Memory: 128, Labels: map[string]string{}}},
 	}
 	rec2, outcome, err := svc.Accept(context.Background(), retry)
 	if err != nil || outcome != Identical {
@@ -116,11 +116,11 @@ func TestAcceptWithFakeCreatedIdenticalConflict(t *testing.T) {
 		t.Fatalf("identical retry returned a different record:\n%s\n%s", ab, bb)
 	}
 
-	conflicting := &store.Placement{
+	conflicting := &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 2,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{{Name: "n", CPU: 200, Memory: 128, Labels: map[string]string{}}},
+		Nodes:     []model.Node{{Name: "n", CPU: 200, Memory: 128, Labels: map[string]string{}}},
 	}
 	rec3, outcome, err := svc.Accept(context.Background(), conflicting)
 	if err != nil || outcome != Conflict {
@@ -146,11 +146,11 @@ func TestAcceptWithFakeCreatedIdenticalConflict(t *testing.T) {
 
 func TestAcceptWithFakeRejectionIsStoredAndReused(t *testing.T) {
 	_, svc := newFakeService()
-	rejected := &store.Placement{
+	rejected := &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: store.Resources{CPU: 2000, Memory: 256},
+		Resources: model.Resources{CPU: 2000, Memory: 256},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{{Name: "n", CPU: 1000, Memory: 512, Labels: map[string]string{}}},
+		Nodes:     []model.Node{{Name: "n", CPU: 1000, Memory: 512, Labels: map[string]string{}}},
 	}
 	rec, outcome, err := svc.Accept(context.Background(), rejected)
 	if err != nil || outcome != Created {
@@ -170,11 +170,11 @@ func TestAcceptWithFakeRejectionIsStoredAndReused(t *testing.T) {
 		t.Fatalf("retry returned %+v, want the original rejection", again)
 	}
 
-	placeable := &store.Placement{
+	placeable := &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{{Name: "n", CPU: 1000, Memory: 512, Labels: map[string]string{}}},
+		Nodes:     []model.Node{{Name: "n", CPU: 1000, Memory: 512, Labels: map[string]string{}}},
 	}
 	rec, outcome, err = svc.Accept(context.Background(), placeable)
 	if err != nil || outcome != Conflict {
@@ -190,10 +190,10 @@ func TestAcceptWithFakeStorageFailure(t *testing.T) {
 	root := errors.New("connection lost")
 	fake.SubmitErr = root
 
-	rec, _, err := svc.Accept(context.Background(), &store.Placement{
+	rec, _, err := svc.Accept(context.Background(), &model.Placement{
 		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
-		Nodes:     []store.Node{},
+		Resources: model.Resources{CPU: 100, Memory: 64},
+		Nodes:     []model.Node{},
 	})
 	if rec != nil {
 		t.Fatalf("failure must not return a record: %+v", rec)

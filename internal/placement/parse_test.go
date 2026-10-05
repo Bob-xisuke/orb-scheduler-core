@@ -6,12 +6,12 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/placement"
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
 // parseOK asserts the body parses and returns the input object.
-func parseOK(t *testing.T, body string) *store.Placement {
+func parseOK(t *testing.T, body string) *model.Placement {
 	t.Helper()
 	p, err := placement.ParsePlacementInput([]byte(body))
 	if err != nil {
@@ -50,14 +50,14 @@ func TestParsePreservesAllFieldsAndNodeOrder(t *testing.T) {
 	  ]
 	}`)
 
-	want := &store.Placement{
+	want := &model.Placement{
 		Namespace: "team-a",
 		Name:      "job-1",
 		Queue:     "default",
 		Priority:  -10,
-		Resources: store.Resources{CPU: 500, Memory: 256},
+		Resources: model.Resources{CPU: 500, Memory: 256},
 		Selector:  map[string]string{"zone": "cn", "": ""},
-		Nodes: []store.Node{
+		Nodes: []model.Node{
 			{Name: "node-b", CPU: 1000, Memory: 512, Labels: map[string]string{"zone": "cn"}},
 			{Name: "node-a", CPU: 0, Memory: 0, Labels: map[string]string{"": ""}},
 		},
@@ -232,14 +232,14 @@ func TestParseOutputReadyForAccept(t *testing.T) {
 	if p.Status != "" || p.Node != nil || p.Reason != nil {
 		t.Fatalf("parse must not schedule: %+v", p)
 	}
-	same, err := store.SameInput(p, &store.Placement{
+	same, err := model.SameInput(p, &model.Placement{
 		Namespace: "ns",
 		Name:      "job",
 		Queue:     "q",
 		Priority:  3,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{{Name: "n1", CPU: 200, Memory: 128, Labels: map[string]string{}}},
+		Nodes:     []model.Node{{Name: "n1", CPU: 200, Memory: 128, Labels: map[string]string{}}},
 	})
 	if err != nil || !same {
 		t.Fatalf("parsed input does not match its explicitly defaulted form: same=%v err=%v", same, err)

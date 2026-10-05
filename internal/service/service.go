@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
 // Scheduling outcomes recorded on every placement.
@@ -56,11 +56,11 @@ func New(st Store) *Service {
 // different content is reported as Conflict and never changes the stored
 // record. Scheduling results alone do not count as equal content. Input
 // validation is expected to have happened before this call.
-func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placement, Outcome, error) {
+func (s *Service) Accept(ctx context.Context, p *model.Placement) (*model.Placement, Outcome, error) {
 	// Fill omitted-field defaults through the single shared definition so
 	// the trial, the stored record and the content comparison all see the
 	// same input. The candidate array's order is left untouched.
-	store.NormalizeInput(p)
+	model.NormalizeInput(p)
 	p.Status, p.Node, p.Reason = schedule(p)
 
 	stored, created, err := s.st.Submit(ctx, p)
@@ -71,7 +71,7 @@ func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placem
 		return stored, Created, nil
 	}
 
-	same, err := store.SameInput(p, stored)
+	same, err := model.SameInput(p, stored)
 	if err != nil {
 		return nil, Created, storageError(err)
 	}

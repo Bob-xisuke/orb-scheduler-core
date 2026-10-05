@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
 // ErrInvalidPlacementInput is the single sentinel returned for every parse
@@ -38,7 +38,7 @@ var ErrInvalidPlacementInput = errors.New("invalid placement input")
 // no trailing data after the root object, every required member present, each
 // field's declared JSON type and range (null is never accepted where a value
 // is required), and unique node names. Defaults for omitted selector/labels
-// are not a parser rule: they come from store.NormalizeInput, the single
+// are not a parser rule: they come from model.NormalizeInput, the single
 // definition shared with acceptance and content comparison.
 // ---------------------------------------------------------------------------
 
@@ -65,10 +65,10 @@ var nodeFields = map[string]bool{
 // returns the complete input object, ready for service.Accept: every input
 // field keeps its submitted value, the node array keeps its order, omitted
 // selector and node labels are filled as empty objects through the shared
-// store.NormalizeInput rules, and an empty nodes array stays an empty array.
+// model.NormalizeInput rules, and an empty nodes array stays an empty array.
 // On any rule violation it returns nil and an error matching
 // errors.Is(err, ErrInvalidPlacementInput).
-func ParsePlacementInput(body []byte) (*store.Placement, error) {
+func ParsePlacementInput(body []byte) (*model.Placement, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 
 	fields, err := readStrictObject(dec, topLevelFields)
@@ -85,7 +85,7 @@ func ParsePlacementInput(body []byte) (*store.Placement, error) {
 		}
 	}
 
-	p := &store.Placement{}
+	p := &model.Placement{}
 	if p.Namespace, err = parseTrimmedString(fields["namespace"]); err != nil {
 		return nil, err
 	}
@@ -113,12 +113,12 @@ func ParsePlacementInput(body []byte) (*store.Placement, error) {
 	}
 	// Omitted selector/labels get their defaults from the single shared
 	// definition, not from a parser-local copy of the rules.
-	store.NormalizeInput(p)
+	model.NormalizeInput(p)
 	return p, nil
 }
 
-func parseResources(raw json.RawMessage) (store.Resources, error) {
-	var r store.Resources
+func parseResources(raw json.RawMessage) (model.Resources, error) {
+	var r model.Resources
 	obj, err := parseStrictObject(raw, resourceFields)
 	if err != nil {
 		return r, err
@@ -139,10 +139,10 @@ func parseResources(raw json.RawMessage) (store.Resources, error) {
 	if err != nil || memory <= 0 {
 		return r, ErrInvalidPlacementInput
 	}
-	return store.Resources{CPU: cpu, Memory: memory}, nil
+	return model.Resources{CPU: cpu, Memory: memory}, nil
 }
 
-func parseNodes(raw json.RawMessage) ([]store.Node, error) {
+func parseNodes(raw json.RawMessage) ([]model.Node, error) {
 	if isNull(raw) {
 		return nil, ErrInvalidPlacementInput
 	}
@@ -155,7 +155,7 @@ func parseNodes(raw json.RawMessage) ([]store.Node, error) {
 		return nil, ErrInvalidPlacementInput
 	}
 
-	nodes := []store.Node{}
+	nodes := []model.Node{}
 	names := map[string]bool{}
 	for dec.More() {
 		var elem json.RawMessage
@@ -201,7 +201,7 @@ func parseNodes(raw json.RawMessage) ([]store.Node, error) {
 			return nil, ErrInvalidPlacementInput
 		}
 		names[name] = true
-		nodes = append(nodes, store.Node{Name: name, CPU: cpu, Memory: memory, Labels: labels})
+		nodes = append(nodes, model.Node{Name: name, CPU: cpu, Memory: memory, Labels: labels})
 	}
 	if _, err := dec.Token(); err != nil {
 		return nil, ErrInvalidPlacementInput // closing ']'

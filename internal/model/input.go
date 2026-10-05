@@ -1,4 +1,4 @@
-package store
+package model
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 // rely on it and must not re-implement any part of it:
 //   - placement.ParsePlacementInput fills defaults through NormalizeInput,
 //   - service.Accept normalizes through NormalizeInput before scheduling,
-//   - Submit/SameInput compare and store content through canonicalInput.
+//   - Submit/SameInput compare and store content through CanonicalInput.
 //
 // The rules:
 //   - an omitted (nil) selector, node labels map, or nodes array is
@@ -64,21 +64,23 @@ func NormalizeInput(p *Placement) {
 // empty objects, object member order is ignored and array order is kept.
 // Scheduling results on either record do not affect the outcome.
 func SameInput(a, b *Placement) (bool, error) {
-	ab, err := canonicalInput(a)
+	ab, err := CanonicalInput(a)
 	if err != nil {
 		return false, err
 	}
-	bb, err := canonicalInput(b)
+	bb, err := CanonicalInput(b)
 	if err != nil {
 		return false, err
 	}
 	return bytes.Equal(ab, bb), nil
 }
 
-// canonicalInput encodes the request half of p in its canonical form. It
+// CanonicalInput encodes the request half of p in its canonical form. It
 // works on a copy so callers can compare records they still own without
-// having defaults filled into their structs.
-func canonicalInput(p *Placement) ([]byte, error) {
+// having defaults filled into their structs. The encoding is the stored
+// format: stores persist exactly these bytes, so the field set, JSON names
+// and key order must never change.
+func CanonicalInput(p *Placement) ([]byte, error) {
 	cp := *p
 	if p.Nodes != nil {
 		cp.Nodes = make([]Node, len(p.Nodes))
@@ -99,4 +101,24 @@ func canonicalInput(p *Placement) ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+// DecodeInput decodes the request half of a stored record from its canonical
+// encoding, as written by CanonicalInput. The scheduling results are not part
+// of that encoding; the returned placement carries only the request fields
+// and leaves Status, Node and Reason to the caller.
+func DecodeInput(data []byte) (*Placement, error) {
+	var in inputPayload
+	if err := json.Unmarshal(data, &in); err != nil {
+		return nil, err
+	}
+	return &Placement{
+		Namespace: in.Namespace,
+		Name:      in.Name,
+		Queue:     in.Queue,
+		Priority:  in.Priority,
+		Resources: in.Resources,
+		Selector:  in.Selector,
+		Nodes:     in.Nodes,
+	}, nil
 }

@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/service/fakestore"
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
 // This suite runs the Query business flow against the in-memory fakestore
@@ -27,30 +27,30 @@ func mustValues(t *testing.T, raw string) url.Values {
 
 // placedRecord builds a stored-looking record without running Accept, so
 // tests control exactly what the storage layer holds.
-func placedRecord(namespace, name, queue, node string) *store.Placement {
-	return &store.Placement{
+func placedRecord(namespace, name, queue, node string) *model.Placement {
+	return &model.Placement{
 		Namespace: namespace,
 		Name:      name,
 		Queue:     queue,
 		Priority:  1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{{Name: node, CPU: 1000, Memory: 512, Labels: map[string]string{}}},
+		Nodes:     []model.Node{{Name: node, CPU: 1000, Memory: 512, Labels: map[string]string{}}},
 		Status:    StatusPlaced,
 		Node:      &node,
 	}
 }
 
-func rejectedRecord(namespace, name, queue string) *store.Placement {
+func rejectedRecord(namespace, name, queue string) *model.Placement {
 	reason := ReasonNoNode
-	return &store.Placement{
+	return &model.Placement{
 		Namespace: namespace,
 		Name:      name,
 		Queue:     queue,
 		Priority:  1,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
-		Nodes:     []store.Node{},
+		Nodes:     []model.Node{},
 		Status:    StatusRejected,
 		Reason:    &reason,
 	}
@@ -90,7 +90,7 @@ func TestQueryWithFakeSingleRecordReturnedAsStored(t *testing.T) {
 	// asks for more than any node has: if Query re-scheduled, the record
 	// could not come back like this.
 	seeded := placedRecord("team-a", "job-1", "default", "node-not-offered")
-	seeded.Resources = store.Resources{CPU: 9999, Memory: 9999}
+	seeded.Resources = model.Resources{CPU: 9999, Memory: 9999}
 	fake.Seed(seeded)
 
 	result, err := svc.Query(context.Background(), mustValues(t, "namespace=team-a&name=job-1"))
@@ -140,7 +140,7 @@ func TestQueryWithFakeListPassesFilterThrough(t *testing.T) {
 		rejectedRecord("a", "n0", "q2"),
 	)
 
-	keys := func(items []*store.Placement) []string {
+	keys := func(items []*model.Placement) []string {
 		var out []string
 		for _, rec := range items {
 			out = append(out, rec.Namespace+"/"+rec.Name)
@@ -157,7 +157,7 @@ func TestQueryWithFakeListPassesFilterThrough(t *testing.T) {
 	if got := keys(all.Items); !equalKeys(got, "a/n0", "a/n1", "a/n2", "z/n2", "ä/n1") {
 		t.Fatalf("list all = %v", got)
 	}
-	if len(fake.Lists) != 1 || fake.Lists[0] != (store.ListFilter{}) {
+	if len(fake.Lists) != 1 || fake.Lists[0] != (model.ListFilter{}) {
 		t.Fatalf("empty query must pass an empty filter, got %+v", fake.Lists)
 	}
 
@@ -169,7 +169,7 @@ func TestQueryWithFakeListPassesFilterThrough(t *testing.T) {
 	if got := keys(result.Items); !equalKeys(got, "a/n1") {
 		t.Fatalf("intersection = %v", got)
 	}
-	wantFilter := store.ListFilter{Namespace: "a", Queue: "q2", Node: "host-2"}
+	wantFilter := model.ListFilter{Namespace: "a", Queue: "q2", Node: "host-2"}
 	if fake.Lists[1] != wantFilter {
 		t.Fatalf("filter = %+v, want %+v", fake.Lists[1], wantFilter)
 	}

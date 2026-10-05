@@ -3,26 +3,26 @@ package service
 import (
 	"testing"
 
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
-func placementFor(nodes ...store.Node) *store.Placement {
-	return &store.Placement{
+func placementFor(nodes ...model.Node) *model.Placement {
+	return &model.Placement{
 		Namespace: "ns",
 		Name:      "job",
 		Queue:     "q",
 		Priority:  0,
-		Resources: store.Resources{CPU: 100, Memory: 64},
+		Resources: model.Resources{CPU: 100, Memory: 64},
 		Selector:  map[string]string{},
 		Nodes:     nodes,
 	}
 }
 
-func node(name string, cpu, mem int64, labels map[string]string) store.Node {
+func node(name string, cpu, mem int64, labels map[string]string) model.Node {
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	return store.Node{Name: name, CPU: cpu, Memory: mem, Labels: labels}
+	return model.Node{Name: name, CPU: cpu, Memory: mem, Labels: labels}
 }
 
 func TestSchedulePicksByteSmallestEligibleNode(t *testing.T) {
@@ -99,7 +99,7 @@ func TestScheduleAcceptsExactCapacityAndIgnoresNilSelector(t *testing.T) {
 }
 
 func TestSchedulePriorityDoesNotChangePick(t *testing.T) {
-	nodes := []store.Node{
+	nodes := []model.Node{
 		node("node-a", 1000, 512, nil),
 		node("node-b", 1000, 512, nil),
 	}

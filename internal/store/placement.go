@@ -3,51 +3,18 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
-
-// Resources is a workload request or a node capacity. CPU is in millicores and
-// memory in MiB; both are non-negative 64-bit integers on the wire.
-type Resources struct {
-	CPU    int64 `json:"cpu"`
-	Memory int64 `json:"memory"`
-}
-
-// Node is one candidate node offered by a placement request.
-type Node struct {
-	Name   string            `json:"name"`
-	CPU    int64             `json:"cpu"`
-	Memory int64             `json:"memory"`
-	Labels map[string]string `json:"labels"`
-}
-
-// Placement is one stored scheduling decision: the request payload plus its
-// status. Node and Reason are pointers so a rejected record renders them as
-// JSON null.
-type Placement struct {
-	Namespace string            `json:"namespace"`
-	Name      string            `json:"name"`
-	Queue     string            `json:"queue"`
-	Priority  int32             `json:"priority"`
-	Resources Resources         `json:"resources"`
-	Selector  map[string]string `json:"selector"`
-	Nodes     []Node            `json:"nodes"`
-	Status    string            `json:"status"`
-	Node      *string           `json:"node"`
-	Reason    *string           `json:"reason"`
-}
-
-// ErrNotFound is returned by Get when no placement matches the identity.
-var ErrNotFound = errors.New("placement not found")
 
 // Submit stores p the first time its (namespace, name) identity is seen. On a
 // repeated submission it returns the previously stored record. created reports
 // whether the row was inserted by this call.
 func (s *Store) Submit(ctx context.Context, p *Placement) (stored *Placement, created bool, err error) {
-	payload, err := canonicalInput(p)
+	payload, err := model.CanonicalInput(p)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode placement: %w", err)
 	}
@@ -107,14 +74,6 @@ func (s *Store) Get(ctx context.Context, namespace, name string) (*Placement, er
 	return decodeRecord(inputJSON, status, node, reason)
 }
 
-// ListFilter narrows List; empty fields are ignored. Node never matches a
-// rejected record.
-type ListFilter struct {
-	Namespace string
-	Queue     string
-	Node      string
-}
-
 // List returns committed placements matching f, sorted by namespace then name
 // in UTF-8 byte order (SQLite BINARY text ordering).
 func (s *Store) List(ctx context.Context, f ListFilter) ([]*Placement, error) {
@@ -164,20 +123,11 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]*Placement, error) {
 }
 
 func decodeRecord(inputJSON, status string, node, reason sql.NullString) (*Placement, error) {
-	var in inputPayload
-	if err := json.Unmarshal([]byte(inputJSON), &in); err != nil {
+	p, err := model.DecodeInput([]byte(inputJSON))
+	if err != nil {
 		return nil, fmt.Errorf("decode stored placement: %w", err)
 	}
-	p := &Placement{
-		Namespace: in.Namespace,
-		Name:      in.Name,
-		Queue:     in.Queue,
-		Priority:  in.Priority,
-		Resources: in.Resources,
-		Selector:  in.Selector,
-		Nodes:     in.Nodes,
-		Status:    status,
-	}
+	p.Status = status
 	if node.Valid {
 		v := node.String
 		p.Node = &v

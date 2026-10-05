@@ -11,6 +11,11 @@ import (
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
+// The SQLite-backed store satisfies the storage contract. The assertion lives
+// in this SQLite-linked test file rather than in store.go so the service
+// package itself never imports the SQLite driver.
+var _ Store = (*store.Store)(nil)
+
 func newService(t *testing.T) (*store.Store, *Service) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "service.db"))
