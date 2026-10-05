@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/service"
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
@@ -23,23 +24,21 @@ const (
 	codeStorageDown  = "storage_unavailable"
 )
 
-const (
-	statusPlaced   = "placed"
-	statusRejected = "rejected"
-	reasonNoNode   = "no_eligible_node"
-)
-
 var errInvalidPlacement = errors.New("invalid placement input")
 
 type placementHandler struct {
-	st *store.Store
+	svc *service.Service
+	st  *store.Store
 }
 
 func writeAPIError(c *gin.Context, status int, code, message string) {
 	c.AbortWithStatusJSON(status, gin.H{"error": gin.H{"code": code, "message": message}})
 }
 
-// createPlacement handles POST /v1/placements.
+// createPlacement handles POST /v1/placements. The transport layer only
+// parses and validates the request and maps the business acceptance outcome
+// to its HTTP status; scheduling and idempotency/conflict decisions belong to
+// service.Accept.
 func (h *placementHandler) createPlacement(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -52,29 +51,20 @@ func (h *placementHandler) createPlacement(c *gin.Context) {
 		return
 	}
 
-	p.Status, p.Node, p.Reason = decide(p)
-
-	stored, created, err := h.st.Submit(c.Request.Context(), p)
+	stored, outcome, err := h.svc.Accept(c.Request.Context(), p)
 	if err != nil {
 		writeAPIError(c, http.StatusServiceUnavailable, codeStorageDown, "database is not available")
 		return
 	}
-	if created {
+	switch outcome {
+	case service.Created:
 		c.JSON(http.StatusCreated, stored)
-		return
-	}
-
-	same, err := store.SameInput(p, stored)
-	if err != nil {
-		writeAPIError(c, http.StatusServiceUnavailable, codeStorageDown, "database is not available")
-		return
-	}
-	if !same {
+	case service.Identical:
+		c.JSON(http.StatusOK, stored)
+	case service.Conflict:
 		writeAPIError(c, http.StatusConflict, codeConflict,
 			"a placement with this namespace and name already exists with different content")
-		return
 	}
-	c.JSON(http.StatusOK, stored)
 }
 
 // listPlacements handles GET /v1/placements, both the single-record form
@@ -144,41 +134,6 @@ func parseQuery(raw string) (map[string]string, error) {
 		params[key] = vals[0]
 	}
 	return params, nil
-}
-
-// decide performs the trial placement: among nodes whose labels contain every
-// selector pair and whose capacity fits the request, it picks the name that is
-// smallest in UTF-8 byte order. Capacity is only probed and never deducted.
-func decide(p *store.Placement) (status string, node *string, reason *string) {
-	var chosen string
-	for i := range p.Nodes {
-		n := &p.Nodes[i]
-		if !labelsSatisfy(n.Labels, p.Selector) {
-			continue
-		}
-		if n.CPU < p.Resources.CPU || n.Memory < p.Resources.Memory {
-			continue
-		}
-		if chosen == "" || n.Name < chosen {
-			chosen = n.Name
-		}
-	}
-	if chosen != "" {
-		n := chosen
-		return statusPlaced, &n, nil
-	}
-	r := reasonNoNode
-	return statusRejected, nil, &r
-}
-
-func labelsSatisfy(labels, selector map[string]string) bool {
-	for key, want := range selector {
-		got, ok := labels[key]
-		if !ok || got != want {
-			return false
-		}
-	}
-	return true
 }
 
 // ---------------------------------------------------------------------------
