@@ -28,7 +28,6 @@ var errInvalidPlacement = errors.New("invalid placement input")
 
 type placementHandler struct {
 	svc *service.Service
-	st  *store.Store
 }
 
 func writeAPIError(c *gin.Context, status int, code, message string) {
@@ -68,72 +67,36 @@ func (h *placementHandler) createPlacement(c *gin.Context) {
 }
 
 // listPlacements handles GET /v1/placements, both the single-record form
-// (namespace+name) and the filtered-list form.
+// (namespace+name) and the filtered-list form. The transport only decodes the
+// raw query string and maps the business result or error to HTTP; every query
+// judgment is service.Query's, shared with independent callers.
 func (h *placementHandler) listPlacements(c *gin.Context) {
-	params, err := parseQuery(c.Request.URL.RawQuery)
+	values, err := url.ParseQuery(c.Request.URL.RawQuery)
 	if err != nil {
 		writeAPIError(c, http.StatusBadRequest, codeInvalidInput, "invalid placement query")
 		return
 	}
 
-	if name, hasName := params["name"]; hasName {
-		namespace, hasNamespace := params["namespace"]
-		_, hasQueue := params["queue"]
-		_, hasNode := params["node"]
-		if !hasNamespace || hasQueue || hasNode {
+	result, err := h.svc.Query(c.Request.Context(), values)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidPlacementQuery):
 			writeAPIError(c, http.StatusBadRequest, codeInvalidInput, "invalid placement query")
-			return
-		}
-		rec, err := h.st.Get(c.Request.Context(), namespace, name)
-		if errors.Is(err, store.ErrNotFound) {
+		case errors.Is(err, service.ErrPlacementNotFound):
 			writeAPIError(c, http.StatusNotFound, codeNotFound, "placement not found")
-			return
-		}
-		if err != nil {
+		default:
+			// service.Query wraps every persistence failure in
+			// service.ErrStorageUnavailable; the body stays generic.
 			writeAPIError(c, http.StatusServiceUnavailable, codeStorageDown, "database is not available")
-			return
 		}
-		c.JSON(http.StatusOK, rec)
 		return
 	}
 
-	recs, err := h.st.List(c.Request.Context(), store.ListFilter{
-		Namespace: params["namespace"],
-		Queue:     params["queue"],
-		Node:      params["node"],
-	})
-	if err != nil {
-		writeAPIError(c, http.StatusServiceUnavailable, codeStorageDown, "database is not available")
+	if result.Record != nil {
+		c.JSON(http.StatusOK, result.Record)
 		return
 	}
-	if recs == nil {
-		recs = []*store.Placement{}
-	}
-	c.JSON(http.StatusOK, gin.H{"items": recs})
-}
-
-var allowedQueryParams = map[string]bool{
-	"namespace": true,
-	"name":      true,
-	"queue":     true,
-	"node":      true,
-}
-
-// parseQuery accepts only the four documented parameters. Empty values,
-// repeated parameters and malformed query strings are rejected.
-func parseQuery(raw string) (map[string]string, error) {
-	values, err := url.ParseQuery(raw)
-	if err != nil {
-		return nil, errInvalidPlacement
-	}
-	params := make(map[string]string, len(values))
-	for key, vals := range values {
-		if !allowedQueryParams[key] || len(vals) != 1 || vals[0] == "" {
-			return nil, errInvalidPlacement
-		}
-		params[key] = vals[0]
-	}
-	return params, nil
+	c.JSON(http.StatusOK, gin.H{"items": result.Items})
 }
 
 // ---------------------------------------------------------------------------
