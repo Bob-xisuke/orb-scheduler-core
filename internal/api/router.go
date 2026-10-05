@@ -24,7 +24,7 @@ func NewRouter(st *store.Store) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "database": "ok"})
 	})
 
-	h := &placementHandler{svc: service.New(st), st: st}
+	h := &placementHandler{svc: service.New(st)}
 	router.POST("/v1/placements", h.createPlacement)
 	router.GET("/v1/placements", h.listPlacements)
 
