@@ -1,6 +1,6 @@
 package service
 
-import "github.com/Bob-xisuke/orb-scheduler-core/internal/store"
+import "github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 
 // schedule performs the trial placement. Among nodes whose labels contain
 // every selector pair and whose CPU and memory capacities both fit the
@@ -10,7 +10,7 @@ import "github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 // placed with the chosen node and no reason, or rejected with no node and
 // reason no_eligible_node. An empty candidate list rejects like any list
 // without an eligible node.
-func schedule(p *store.Placement) (status string, node *string, reason *string) {
+func schedule(p *model.Placement) (status string, node *string, reason *string) {
 	var chosen string
 	found := false
 	for i := range p.Nodes {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
 // Query business errors, both recognizable with errors.Is.
@@ -25,8 +25,8 @@ var (
 // failure both are nil. Items is never nil on a successful list, even when
 // nothing matched.
 type QueryResult struct {
-	Record *store.Placement
-	Items  []*store.Placement
+	Record *model.Placement
+	Items  []*model.Placement
 }
 
 // Query is the transport-independent read entry point. values holds the
@@ -50,7 +50,7 @@ func (s *Service) Query(ctx context.Context, values url.Values) (QueryResult, er
 
 	if name, hasName := params["name"]; hasName {
 		rec, err := s.st.Get(ctx, params["namespace"], name)
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, model.ErrNotFound) {
 			return QueryResult{}, fmt.Errorf("query placement: %w", ErrPlacementNotFound)
 		}
 		if err != nil {
@@ -59,7 +59,7 @@ func (s *Service) Query(ctx context.Context, values url.Values) (QueryResult, er
 		return QueryResult{Record: rec}, nil
 	}
 
-	recs, err := s.st.List(ctx, store.ListFilter{
+	recs, err := s.st.List(ctx, model.ListFilter{
 		Namespace: params["namespace"],
 		Queue:     params["queue"],
 		Node:      params["node"],
@@ -68,7 +68,7 @@ func (s *Service) Query(ctx context.Context, values url.Values) (QueryResult, er
 		return QueryResult{}, queryStorageError(err)
 	}
 	if recs == nil {
-		recs = []*store.Placement{}
+		recs = []*model.Placement{}
 	}
 	return QueryResult{Items: recs}, nil
 }

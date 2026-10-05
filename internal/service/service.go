@@ -1,7 +1,7 @@
 // Package service implements placement acceptance: the trial scheduling
 // decision together with idempotent, conflict-aware registration. Accept is
 // the single business entry point for a parsed placement request; it has no
-// dependency on the HTTP transport.
+// dependency on the HTTP transport and no dependency on any storage driver.
 package service
 
 import (
@@ -9,7 +9,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
 // Scheduling outcomes recorded on every placement.
@@ -43,8 +43,8 @@ type Service struct {
 }
 
 // New builds the acceptance service over a Store. Production callers pass the
-// SQLite-backed *store.Store; tests may pass any implementation of the
-// contract without changing Accept or Query behavior.
+// SQLite-backed store; tests may pass any implementation of the contract
+// (including the in-memory double) without changing Accept or Query behavior.
 func New(st Store) *Service {
 	return &Service{st: st}
 }
@@ -56,11 +56,11 @@ func New(st Store) *Service {
 // different content is reported as Conflict and never changes the stored
 // record. Scheduling results alone do not count as equal content. Input
 // validation is expected to have happened before this call.
-func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placement, Outcome, error) {
+func (s *Service) Accept(ctx context.Context, p *model.Placement) (*model.Placement, Outcome, error) {
 	// Fill omitted-field defaults through the single shared definition so
 	// the trial, the stored record and the content comparison all see the
 	// same input. The candidate array's order is left untouched.
-	store.NormalizeInput(p)
+	model.NormalizeInput(p)
 	p.Status, p.Node, p.Reason = schedule(p)
 
 	stored, created, err := s.st.Submit(ctx, p)
@@ -71,7 +71,7 @@ func (s *Service) Accept(ctx context.Context, p *store.Placement) (*store.Placem
 		return stored, Created, nil
 	}
 
-	same, err := store.SameInput(p, stored)
+	same, err := model.SameInput(p, stored)
 	if err != nil {
 		return nil, Created, storageError(err)
 	}

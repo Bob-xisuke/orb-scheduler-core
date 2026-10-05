@@ -3,51 +3,24 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
-
-// Resources is a workload request or a node capacity. CPU is in millicores and
-// memory in MiB; both are non-negative 64-bit integers on the wire.
-type Resources struct {
-	CPU    int64 `json:"cpu"`
-	Memory int64 `json:"memory"`
-}
-
-// Node is one candidate node offered by a placement request.
-type Node struct {
-	Name   string            `json:"name"`
-	CPU    int64             `json:"cpu"`
-	Memory int64             `json:"memory"`
-	Labels map[string]string `json:"labels"`
-}
-
-// Placement is one stored scheduling decision: the request payload plus its
-// status. Node and Reason are pointers so a rejected record renders them as
-// JSON null.
-type Placement struct {
-	Namespace string            `json:"namespace"`
-	Name      string            `json:"name"`
-	Queue     string            `json:"queue"`
-	Priority  int32             `json:"priority"`
-	Resources Resources         `json:"resources"`
-	Selector  map[string]string `json:"selector"`
-	Nodes     []Node            `json:"nodes"`
-	Status    string            `json:"status"`
-	Node      *string           `json:"node"`
-	Reason    *string           `json:"reason"`
-}
-
-// ErrNotFound is returned by Get when no placement matches the identity.
-var ErrNotFound = errors.New("placement not found")
 
 // Submit stores p the first time its (namespace, name) identity is seen. On a
 // repeated submission it returns the previously stored record. created reports
 // whether the row was inserted by this call.
-func (s *Store) Submit(ctx context.Context, p *Placement) (stored *Placement, created bool, err error) {
-	payload, err := canonicalInput(p)
+//
+// The whole interaction runs in one transaction whose UNIQUE primary key is
+// the guarantee that one identity is stored exactly once: a concurrent
+// duplicate insert fails the constraint inside the same transaction and is
+// answered by reading the committed row back, so only committed content is
+// ever returned.
+func (s *Store) Submit(ctx context.Context, p *model.Placement) (stored *model.Placement, created bool, err error) {
+	payload, err := model.EncodeInput(p)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode placement: %w", err)
 	}
@@ -89,9 +62,9 @@ func (s *Store) Submit(ctx context.Context, p *Placement) (stored *Placement, cr
 	return existing, false, nil
 }
 
-// Get fetches a single placement by its identity. It returns ErrNotFound when
-// the identity is unknown.
-func (s *Store) Get(ctx context.Context, namespace, name string) (*Placement, error) {
+// Get fetches a single placement by its identity. It returns model.ErrNotFound
+// (aliased here as ErrNotFound) when the identity is unknown.
+func (s *Store) Get(ctx context.Context, namespace, name string) (*model.Placement, error) {
 	row := s.db.QueryRowContext(ctx,
 		"SELECT input_json, status, node, reason FROM placements WHERE namespace = ? AND name = ?",
 		namespace, name,
@@ -100,24 +73,16 @@ func (s *Store) Get(ctx context.Context, namespace, name string) (*Placement, er
 	var node, reason sql.NullString
 	if err := row.Scan(&inputJSON, &status, &node, &reason); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
+			return nil, model.ErrNotFound
 		}
 		return nil, fmt.Errorf("get placement: %w", err)
 	}
 	return decodeRecord(inputJSON, status, node, reason)
 }
 
-// ListFilter narrows List; empty fields are ignored. Node never matches a
-// rejected record.
-type ListFilter struct {
-	Namespace string
-	Queue     string
-	Node      string
-}
-
 // List returns committed placements matching f, sorted by namespace then name
 // in UTF-8 byte order (SQLite BINARY text ordering).
-func (s *Store) List(ctx context.Context, f ListFilter) ([]*Placement, error) {
+func (s *Store) List(ctx context.Context, f model.ListFilter) ([]*model.Placement, error) {
 	var clauses []string
 	var args []any
 	if f.Namespace != "" {
@@ -144,7 +109,7 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]*Placement, error) {
 	}
 	defer rows.Close()
 
-	var out []*Placement
+	var out []*model.Placement
 	for rows.Next() {
 		var inputJSON, status string
 		var node, reason sql.NullString
@@ -163,33 +128,26 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]*Placement, error) {
 	return out, nil
 }
 
-func decodeRecord(inputJSON, status string, node, reason sql.NullString) (*Placement, error) {
-	var in inputPayload
-	if err := json.Unmarshal([]byte(inputJSON), &in); err != nil {
-		return nil, fmt.Errorf("decode stored placement: %w", err)
-	}
-	p := &Placement{
-		Namespace: in.Namespace,
-		Name:      in.Name,
-		Queue:     in.Queue,
-		Priority:  in.Priority,
-		Resources: in.Resources,
-		Selector:  in.Selector,
-		Nodes:     in.Nodes,
-		Status:    status,
-	}
+// decodeRecord bridges the nullable SQL columns to the storage-independent
+// model decoder: NULL node/reason become nil pointers so a rejected record
+// renders those fields as JSON null.
+func decodeRecord(inputJSON, status string, node, reason sql.NullString) (*model.Placement, error) {
+	var nodePtr, reasonPtr *string
 	if node.Valid {
 		v := node.String
-		p.Node = &v
+		nodePtr = &v
 	}
 	if reason.Valid {
 		v := reason.String
-		p.Reason = &v
+		reasonPtr = &v
 	}
-	return p, nil
+	return model.DecodeRecord(inputJSON, status, nodePtr, reasonPtr)
 }
 
 func isUniqueViolation(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unique constraint failed")
 }
+
+// *Store satisfies the storage-independent persistence contract.
+var _ model.Store = (*Store)(nil)
