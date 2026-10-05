@@ -39,11 +39,13 @@ var ErrStorageUnavailable = errors.New("storage unavailable")
 
 // Service holds the collaborators needed to accept placements.
 type Service struct {
-	st *store.Store
+	st Store
 }
 
-// New builds the acceptance service over a store.
-func New(st *store.Store) *Service {
+// New builds the acceptance service over a Store. Production callers pass the
+// SQLite-backed *store.Store; tests may pass any implementation of the
+// contract without changing Accept or Query behavior.
+func New(st Store) *Service {
 	return &Service{st: st}
 }
 
