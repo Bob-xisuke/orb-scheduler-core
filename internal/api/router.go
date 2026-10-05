@@ -8,8 +8,8 @@ import (
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
-// NewRouter wires the public HTTP surface. Only the health entry is published today; the service
-// contract in README.md describes the error shape every entry must keep.
+// NewRouter wires the public HTTP surface: health and the placements API. Every
+// entry keeps the error shape described in README.md.
 func NewRouter(st *store.Store) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -22,6 +22,10 @@ func NewRouter(st *store.Store) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok", "database": "ok"})
 	})
+
+	h := &placementHandler{st: st}
+	router.POST("/v1/placements", h.createPlacement)
+	router.GET("/v1/placements", h.listPlacements)
 
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "route_not_found", "message": "no route matches this path"}})

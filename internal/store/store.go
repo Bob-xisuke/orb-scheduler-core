@@ -23,6 +23,14 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("enable wal: %w", err)
 	}
+	// Serialize access through one connection: combined with WAL this keeps
+	// concurrent submissions free of busy errors while the UNIQUE constraint
+	// remains the guarantee that one identity is stored exactly once.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
@@ -41,4 +49,19 @@ CREATE TABLE IF NOT EXISTS service_metadata (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS placements (
+	namespace  TEXT NOT NULL,
+	name       TEXT NOT NULL,
+	input_json TEXT NOT NULL,
+	status     TEXT NOT NULL,
+	node       TEXT,
+	reason     TEXT,
+	queue      TEXT NOT NULL GENERATED ALWAYS AS (json_extract(input_json, '$.queue')) VIRTUAL,
+	PRIMARY KEY (namespace, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_placements_ns   ON placements (namespace);
+CREATE INDEX IF NOT EXISTS idx_placements_queue ON placements (queue);
+CREATE INDEX IF NOT EXISTS idx_placements_node  ON placements (node);
 `
