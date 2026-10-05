@@ -26,13 +26,18 @@ var ErrInvalidPlacementInput = errors.New("invalid placement input")
 // ---------------------------------------------------------------------------
 // Strict request parsing.
 //
-// The token walk below enforces, before anything is stored:
-//   - the body is one JSON object with exactly the documented members,
-//   - no unknown or duplicate member names at any level,
-//   - no trailing data after the root object,
-//   - every value has the declared JSON type and range (null is never accepted
-//     where a value is required; omitted selector/labels default to {}),
-//   - node names are unique.
+// readStrictObject/readObjectMembers below are the single definition of the
+// object-member rules shared by the top-level request body and every nested
+// object (resources, node, selector, labels):
+//   - the value is exactly one JSON object,
+//   - no unknown or duplicate member names (member names are compared after
+//     escape decoding, so a name also collides with its escaped spellings),
+//   - each value is captured raw for the field-specific rules that follow.
+//
+// ParsePlacementInput adds the root-level rules on top of that shared walk:
+// no trailing data after the root object, every required member present, each
+// field's declared JSON type and range (null is never accepted where a value
+// is required; omitted selector/labels default to {}), and unique node names.
 // ---------------------------------------------------------------------------
 
 var topLevelFields = map[string]bool{
@@ -62,88 +67,47 @@ var nodeFields = map[string]bool{
 // error matching errors.Is(err, ErrInvalidPlacementInput).
 func ParsePlacementInput(body []byte) (*store.Placement, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.UseNumber()
 
-	tok, err := dec.Token()
+	fields, err := readStrictObject(dec, topLevelFields)
 	if err != nil {
-		return nil, ErrInvalidPlacementInput
-	}
-	if d, ok := tok.(json.Delim); !ok || d != '{' {
-		return nil, ErrInvalidPlacementInput
-	}
-
-	p := &store.Placement{}
-	seen := map[string]bool{}
-	for dec.More() {
-		keyTok, err := dec.Token()
-		if err != nil {
-			return nil, ErrInvalidPlacementInput
-		}
-		key, ok := keyTok.(string)
-		if !ok || !topLevelFields[key] || seen[key] {
-			return nil, ErrInvalidPlacementInput
-		}
-		seen[key] = true
-
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			return nil, ErrInvalidPlacementInput
-		}
-
-		switch key {
-		case "namespace", "name", "queue":
-			s, err := parseTrimmedString(raw)
-			if err != nil {
-				return nil, err
-			}
-			switch key {
-			case "namespace":
-				p.Namespace = s
-			case "name":
-				p.Name = s
-			case "queue":
-				p.Queue = s
-			}
-		case "priority":
-			n, err := parseBoundedInt(raw, 32)
-			if err != nil {
-				return nil, err
-			}
-			p.Priority = int32(n)
-		case "resources":
-			r, err := parseResources(raw)
-			if err != nil {
-				return nil, err
-			}
-			p.Resources = r
-		case "selector":
-			m, err := parseStringMap(raw)
-			if err != nil {
-				return nil, err
-			}
-			p.Selector = m
-		case "nodes":
-			nodes, err := parseNodes(raw)
-			if err != nil {
-				return nil, err
-			}
-			p.Nodes = nodes
-		}
-	}
-	if _, err := dec.Token(); err != nil {
-		return nil, ErrInvalidPlacementInput // closing '}'
+		return nil, err
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, ErrInvalidPlacementInput // trailing data
 	}
 
 	for _, required := range []string{"namespace", "name", "queue", "priority", "resources", "nodes"} {
-		if !seen[required] {
+		if _, ok := fields[required]; !ok {
 			return nil, ErrInvalidPlacementInput
 		}
 	}
-	if p.Selector == nil {
-		p.Selector = map[string]string{}
+
+	p := &store.Placement{}
+	if p.Namespace, err = parseTrimmedString(fields["namespace"]); err != nil {
+		return nil, err
+	}
+	if p.Name, err = parseTrimmedString(fields["name"]); err != nil {
+		return nil, err
+	}
+	if p.Queue, err = parseTrimmedString(fields["queue"]); err != nil {
+		return nil, err
+	}
+	priority, err := parseBoundedInt(fields["priority"], 32)
+	if err != nil {
+		return nil, err
+	}
+	p.Priority = int32(priority)
+	if p.Resources, err = parseResources(fields["resources"]); err != nil {
+		return nil, err
+	}
+	if p.Nodes, err = parseNodes(fields["nodes"]); err != nil {
+		return nil, err
+	}
+	p.Selector = map[string]string{}
+	if raw, ok := fields["selector"]; ok {
+		if p.Selector, err = parseStringMap(raw); err != nil {
+			return nil, err
+		}
 	}
 	return p, nil
 }
@@ -240,13 +204,12 @@ func parseNodes(raw json.RawMessage) ([]store.Node, error) {
 	return nodes, nil
 }
 
-// parseStrictObject decodes an object whose member names are restricted to
-// allowed. Both unknown and duplicate names are rejected.
-func parseStrictObject(raw json.RawMessage, allowed map[string]bool) (map[string]json.RawMessage, error) {
-	if isNull(raw) {
-		return nil, ErrInvalidPlacementInput
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
+// readStrictObject consumes exactly one JSON object from dec and returns its
+// members with their values still raw. Together with readObjectMembers it is
+// the single definition of the member rules: member names are restricted to
+// allowed (nil allows any names), and unknown and duplicate names are
+// rejected before the duplicate value can overwrite anything.
+func readStrictObject(dec *json.Decoder, allowed map[string]bool) (map[string]json.RawMessage, error) {
 	tok, err := dec.Token()
 	if err != nil {
 		return nil, ErrInvalidPlacementInput
@@ -257,26 +220,22 @@ func parseStrictObject(raw json.RawMessage, allowed map[string]bool) (map[string
 	return readObjectMembers(dec, allowed)
 }
 
-// parseStringMap decodes an object with arbitrary string keys and string
-// values; null or non-string values are rejected.
-func parseStringMap(raw json.RawMessage) (map[string]string, error) {
+// parseStrictObject applies the shared member rules to a raw nested object.
+func parseStrictObject(raw json.RawMessage, allowed map[string]bool) (map[string]json.RawMessage, error) {
 	if isNull(raw) {
 		return nil, ErrInvalidPlacementInput
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	tok, err := dec.Token()
-	if err != nil {
-		return nil, ErrInvalidPlacementInput
-	}
-	if d, ok := tok.(json.Delim); !ok || d != '{' {
-		return nil, ErrInvalidPlacementInput
-	}
+	return readStrictObject(json.NewDecoder(bytes.NewReader(raw)), allowed)
+}
 
-	out := map[string]string{}
-	raws, err := readObjectMembers(dec, nil)
+// parseStringMap decodes an object with arbitrary string keys and string
+// values; null or non-string values are rejected.
+func parseStringMap(raw json.RawMessage) (map[string]string, error) {
+	raws, err := parseStrictObject(raw, nil)
 	if err != nil {
 		return nil, err
 	}
+	out := map[string]string{}
 	for key, value := range raws {
 		s, err := parseJSONString(value)
 		if err != nil {

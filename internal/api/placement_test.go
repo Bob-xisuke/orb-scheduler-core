@@ -511,3 +511,30 @@ func TestRecordsSurviveReopen(t *testing.T) {
 		t.Fatalf("record changed across reopen: %s", rec.Body.String())
 	}
 }
+
+// A resubmission that differs only textually — members reordered, member
+// names written with Unicode escapes, omitted defaults spelled out — carries
+// the same content: 200 with the original record, not a new one.
+func TestTextualVariantResubmissionReturnsOriginal(t *testing.T) {
+	_, h := newTestRouter(t)
+	first := postPlacement(t, h, `{
+	  "namespace": "ns", "name": "job", "queue": "q", "priority": 1,
+	  "resources": {"cpu": 100, "memory": 64},
+	  "nodes": [{"name": "n", "cpu": 200, "memory": 128}]
+	}`)
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first = %d: %s", first.Code, first.Body.String())
+	}
+	variant := postPlacement(t, h, `{
+	  "nodes": [{"lab\u0065ls": {}, "memory": 128, "cpu": 200, "name": "n"}],
+	  "resour\u0063es": {"memory": 64, "cpu": 100},
+	  "selector": {},
+	  "priority": 1, "queue": "q", "name": "job", "namespac\u0065": "ns"
+	}`)
+	if variant.Code != http.StatusOK {
+		t.Fatalf("variant = %d, want 200: %s", variant.Code, variant.Body.String())
+	}
+	if variant.Body.String() != first.Body.String() {
+		t.Fatalf("variant returned a different record:\n%s\n%s", first.Body.String(), variant.Body.String())
+	}
+}

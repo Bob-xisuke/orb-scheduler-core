@@ -245,3 +245,62 @@ func TestParseOutputReadyForAccept(t *testing.T) {
 		t.Fatalf("parsed input does not match its explicitly defaulted form: same=%v err=%v", same, err)
 	}
 }
+
+// Textual variants of one request — members reordered, member names written
+// with Unicode escapes, and omitted defaults spelled out explicitly — carry
+// the same business content and must parse to the identical input object.
+func TestParseTextualVariantsEquivalent(t *testing.T) {
+	canonical := `{
+	  "namespace": "team-a",
+	  "name": "job-1",
+	  "queue": "default",
+	  "priority": -3,
+	  "resources": {"cpu": 500, "memory": 256},
+	  "nodes": [
+	    {"name": "node-b", "cpu": 1000, "memory": 512, "labels": {"zone": "cn"}},
+	    {"name": "node-a", "cpu": 0, "memory": 0}
+	  ]
+	}`
+	want := parseOK(t, canonical)
+
+	variants := map[string]string{
+		"members reordered": `{
+		  "nodes": [
+		    {"labels": {"zone": "cn"}, "memory": 512, "cpu": 1000, "name": "node-b"},
+		    {"memory": 0, "cpu": 0, "name": "node-a"}
+		  ],
+		  "resources": {"memory": 256, "cpu": 500},
+		  "priority": -3, "queue": "default", "name": "job-1", "namespace": "team-a"
+		}`,
+		"escaped member names": `{
+		  "namespac\u0065": "team-a",
+		  "name": "job-1",
+		  "queue": "default",
+		  "priority": -3,
+		  "resour\u0063es": {"\u0063pu": 500, "memory": 256},
+		  "nodes": [
+		    {"name": "node-b", "cpu": 1000, "memory": 512, "lab\u0065ls": {"zone": "cn"}},
+		    {"name": "node-a", "cpu": 0, "memory": 0}
+		  ]
+		}`,
+		"defaults explicit": `{
+		  "namespace": "team-a",
+		  "name": "job-1",
+		  "queue": "default",
+		  "priority": -3,
+		  "resources": {"cpu": 500, "memory": 256},
+		  "selector": {},
+		  "nodes": [
+		    {"name": "node-b", "cpu": 1000, "memory": 512, "labels": {"zone": "cn"}},
+		    {"name": "node-a", "cpu": 0, "memory": 0, "labels": {}}
+		  ]
+		}`,
+	}
+	for name, body := range variants {
+		t.Run(name, func(t *testing.T) {
+			if got := parseOK(t, body); !reflect.DeepEqual(got, want) {
+				t.Fatalf("variant parsed to %+v, want %+v", got, want)
+			}
+		})
+	}
+}
