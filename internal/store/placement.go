@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
@@ -36,7 +39,7 @@ func (s *Store) Submit(ctx context.Context, p *Placement) (stored *Placement, cr
 		out := *p
 		return &out, true, nil
 	}
-	if !isUniqueViolation(execErr) {
+	if !isDuplicateIdentity(execErr) {
 		return nil, false, fmt.Errorf("insert placement: %w", execErr)
 	}
 
@@ -139,7 +142,24 @@ func decodeRecord(inputJSON, status string, node, reason sql.NullString) (*Place
 	return p, nil
 }
 
-func isUniqueViolation(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unique constraint failed")
+// isDuplicateIdentity reports whether err is the SQLite primary-key conflict
+// raised when a placement's (namespace, name) identity is already stored.
+// The judgment rests solely on the driver's structured result code, matched
+// through error wrapping with errors.As; the message text is never consulted.
+// That keeps the acceptance verdict stable when the driver rewords its
+// messages or wraps them, and keeps look-alike failures — a plain error whose
+// text mentions "unique constraint failed", or a different constraint such as
+// NOT NULL or CHECK — on the storage-failure path. The placements table's
+// only unique constraint is its primary key, so the PRIMARYKEY and UNIQUE
+// extended codes both mean this identity already exists.
+func isDuplicateIdentity(err error) bool {
+	var sqlErr *sqlite.Error
+	if !errors.As(err, &sqlErr) {
+		return false
+	}
+	switch sqlErr.Code() {
+	case sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY, sqlite3.SQLITE_CONSTRAINT_UNIQUE:
+		return true
+	}
+	return false
 }

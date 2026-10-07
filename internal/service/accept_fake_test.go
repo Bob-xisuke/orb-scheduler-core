@@ -209,3 +209,32 @@ func TestAcceptWithFakeStorageFailure(t *testing.T) {
 		t.Fatalf("submits = %d, want 1", len(fake.Submits))
 	}
 }
+
+// A storage failure whose text imitates the SQLite unique-constraint wording
+// is still a storage failure: Accept must answer ErrStorageUnavailable, never
+// a content conflict, and must not fabricate a record. Only the real store's
+// structured duplicate-identity judgment may route a submission to the
+// read-original path.
+func TestAcceptWithFakeUniqueLookingErrorIsStorageFailure(t *testing.T) {
+	fake, svc := newFakeService()
+	root := errors.New("UNIQUE constraint failed: placements.namespace, placements.name")
+	fake.SubmitErr = root
+
+	rec, outcome, err := svc.Accept(context.Background(), &model.Placement{
+		Namespace: "ns", Name: "job", Queue: "q", Priority: 1,
+		Resources: model.Resources{CPU: 100, Memory: 64},
+		Nodes:     []model.Node{},
+	})
+	if rec != nil {
+		t.Fatalf("failure must not return a record: %+v", rec)
+	}
+	if outcome != Created {
+		t.Fatalf("outcome = %d, want the zero Created outcome on failure", outcome)
+	}
+	if !errors.Is(err, ErrStorageUnavailable) {
+		t.Fatalf("err = %v, want ErrStorageUnavailable", err)
+	}
+	if !errors.Is(err, root) {
+		t.Fatalf("err = %v, want the injected root error to stay recognizable", err)
+	}
+}
