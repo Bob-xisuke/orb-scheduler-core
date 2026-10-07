@@ -33,6 +33,8 @@ type GetCall struct {
 // safe for concurrent use.
 //
 // Its default behavior mirrors the storage guarantees the service relies on:
+//   - Ping succeeds and is independently counted, so the HTTP health probe
+//     can be failed with PingErr without touching any stored record;
 //   - Submit keeps the first record stored for a (namespace, name) identity
 //     and answers later submissions of that identity with the kept record
 //     and created false;
@@ -41,19 +43,22 @@ type GetCall struct {
 //     matches a rejected record) and sorts by namespace then name in UTF-8
 //     byte order.
 //
-// Setting SubmitErr, GetErr or ListErr makes the matching method fail with
-// that error instead of touching the in-memory records. Records can be
-// preloaded with Seed, which is not counted as a call. Every Submit, Get and
-// List invocation is appended to Submits, Gets and Lists.
+// Setting PingErr, SubmitErr, GetErr or ListErr makes the matching method
+// fail with that error instead of touching the in-memory records. Records
+// can be preloaded with Seed, which is not counted as a call. Every Ping,
+// Submit, Get and List invocation is appended to Pings, Submits, Gets
+// and Lists.
 type Store struct {
 	mu      sync.Mutex
 	records map[identity]*model.Placement
 	order   []identity
 
+	PingErr   error
 	SubmitErr error
 	GetErr    error
 	ListErr   error
 
+	Pings   int
 	Submits []SubmitCall
 	Gets    []GetCall
 	Lists   []model.ListFilter
@@ -80,6 +85,17 @@ func (s *Store) Seed(records ...*model.Placement) {
 		s.records[id] = clone(rec)
 		s.order = append(s.order, id)
 	}
+}
+
+// Ping implements the service storage contract: it succeeds by default
+// and fails with PingErr when the test needs the health probe to report
+// the store unavailable. It never reads or mutates the stored records,
+// and a failed Ping must not pre-empt the accept or query flows.
+func (s *Store) Ping(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Pings++
+	return s.PingErr
 }
 
 // Submit implements the service storage contract: it stores a copy of p the

@@ -6,15 +6,20 @@ import (
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
-// Store is the persistence contract Accept and Query rely on. The production
-// implementation is the SQLite-backed *store.Store; tests can substitute an
-// in-memory double (see internal/service/fakestore) that controls the
-// returned records and errors without creating a database file. Either way
-// the business flow — defaults, trial scheduling, idempotency and conflict
-// rules, query validation — stays in this package and is never re-implemented
-// by the storage side. The contract speaks only in model types, so
-// implementing it never requires a SQLite driver.
+// Store is the persistence contract Accept, Query and the HTTP health
+// probe rely on. The production implementation is the SQLite-backed
+// *store.Store; tests can substitute an in-memory double (see
+// internal/service/fakestore) that controls the returned records and
+// errors without creating a database file. Either way the business flow
+// — defaults, trial scheduling, idempotency and conflict rules, query
+// validation — stays in this package and is never re-implemented by the
+// storage side. The contract speaks only in model types, so implementing
+// it never requires a SQLite driver.
 type Store interface {
+	// Ping reports whether the storage layer is usable. The health route
+	// answers from it alone; a failing Ping must not change or inspect any
+	// stored record.
+	Ping(ctx context.Context) error
 	// Submit stores p the first time its (namespace, name) identity is seen
 	// and reports created; on a repeated identity it returns the previously
 	// stored record with created false and changes nothing.

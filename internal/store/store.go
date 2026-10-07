@@ -2,6 +2,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -39,7 +40,7 @@ func Open(path string) (*Store, error) {
 }
 
 // Ping reports whether the storage layer is usable.
-func (s *Store) Ping() error { return s.db.Ping() }
+func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
 
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
