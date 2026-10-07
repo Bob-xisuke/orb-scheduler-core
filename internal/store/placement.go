@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/model"
 )
 
@@ -36,7 +39,7 @@ func (s *Store) Submit(ctx context.Context, p *Placement) (stored *Placement, cr
 		out := *p
 		return &out, true, nil
 	}
-	if !isUniqueViolation(execErr) {
+	if !isDuplicateIdentity(execErr) {
 		return nil, false, fmt.Errorf("insert placement: %w", execErr)
 	}
 
@@ -139,7 +142,26 @@ func decodeRecord(inputJSON, status string, node, reason sql.NullString) (*Place
 	return p, nil
 }
 
-func isUniqueViolation(err error) bool {
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unique constraint failed")
+// isDuplicateIdentity reports whether err is the constraint violation SQLite
+// raises when a row with the same (namespace, name) primary key already
+// exists. The judgment rests solely on the driver's structured result code,
+// never on message text, so reworded driver messages and ordinary error
+// wrapping cannot change the conclusion. Other constraint failures (NOT NULL,
+// CHECK, foreign key, ...) and non-constraint errors are storage faults, not
+// duplicates, even when their message happens to mention unique constraints.
+func isDuplicateIdentity(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	// Code is the extended result code. The placements table's only unique
+	// constraint is its primary key, so both the PRIMARYKEY code and the
+	// UNIQUE code SQLite may report for the key's backing index mean the
+	// identity is already stored; every other code is a storage failure.
+	switch sqliteErr.Code() {
+	case sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY, sqlite3.SQLITE_CONSTRAINT_UNIQUE:
+		return true
+	default:
+		return false
+	}
 }
