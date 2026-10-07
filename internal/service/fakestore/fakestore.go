@@ -41,19 +41,22 @@ type GetCall struct {
 //     matches a rejected record) and sorts by namespace then name in UTF-8
 //     byte order.
 //
-// Setting SubmitErr, GetErr or ListErr makes the matching method fail with
-// that error instead of touching the in-memory records. Records can be
-// preloaded with Seed, which is not counted as a call. Every Submit, Get and
-// List invocation is appended to Submits, Gets and Lists.
+// Setting PingErr, SubmitErr, GetErr or ListErr makes the matching method
+// fail with that error instead of touching the in-memory records. Records
+// can be preloaded with Seed, which is not counted as a call. Every Ping,
+// Submit, Get and List invocation is appended to Pings, Submits, Gets and
+// Lists.
 type Store struct {
 	mu      sync.Mutex
 	records map[identity]*model.Placement
 	order   []identity
 
+	PingErr   error
 	SubmitErr error
 	GetErr    error
 	ListErr   error
 
+	Pings   int
 	Submits []SubmitCall
 	Gets    []GetCall
 	Lists   []model.ListFilter
@@ -80,6 +83,15 @@ func (s *Store) Seed(records ...*model.Placement) {
 		s.records[id] = clone(rec)
 		s.order = append(s.order, id)
 	}
+}
+
+// Ping implements the service storage contract: the in-memory double is
+// always healthy unless PingErr is set; it never inspects the records.
+func (s *Store) Ping(_ context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Pings++
+	return s.PingErr
 }
 
 // Submit implements the service storage contract: it stores a copy of p the

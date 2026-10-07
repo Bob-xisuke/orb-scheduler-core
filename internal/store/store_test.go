@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
@@ -11,7 +12,7 @@ func TestOpenCreatesUsableStore(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer st.Close()
-	if err := st.Ping(); err != nil {
+	if err := st.Ping(context.Background()); err != nil {
 		t.Fatalf("ping: %v", err)
 	}
 }

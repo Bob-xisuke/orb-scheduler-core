@@ -18,6 +18,10 @@ type Store interface {
 	// Submit stores p the first time its (namespace, name) identity is seen
 	// and reports created; on a repeated identity it returns the previously
 	// stored record with created false and changes nothing.
+	// Ping reports whether the storage layer is ready to serve requests.
+	// The health endpoint is its only caller: acceptance and query never
+	// probe storage up front, so a failing Ping cannot block a placement.
+	Ping(ctx context.Context) error
 	Submit(ctx context.Context, p *model.Placement) (stored *model.Placement, created bool, err error)
 	// Get fetches one record by identity, returning model.ErrNotFound when
 	// the identity is unknown.

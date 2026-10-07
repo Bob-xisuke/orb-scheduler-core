@@ -77,3 +77,41 @@ func TestBusinessPathRunsAgainstDouble(t *testing.T) {
 		t.Fatalf("missing identity err = %v, want ErrPlacementNotFound", err)
 	}
 }
+
+// Ping is healthy by default, each probe is counted, and PingErr makes it
+// report the injected failure without the accept or query paths probing
+// storage themselves.
+func TestPingDouble(t *testing.T) {
+	fake := &fakestore.Store{}
+	ctx := context.Background()
+
+	if err := fake.Ping(ctx); err != nil {
+		t.Fatalf("default ping = %v, want nil", err)
+	}
+	if err := fake.Ping(ctx); err != nil {
+		t.Fatalf("second ping = %v, want nil", err)
+	}
+	if fake.Pings != 2 {
+		t.Fatalf("pings = %d, want 2", fake.Pings)
+	}
+
+	root := errors.New("probe failed")
+	fake.PingErr = root
+	if err := fake.Ping(ctx); !errors.Is(err, root) {
+		t.Fatalf("injected ping err = %v, want %v", err, root)
+	}
+	if fake.Pings != 3 {
+		t.Fatalf("failing ping still counted: pings = %d, want 3", fake.Pings)
+	}
+
+	// Ping failures are isolated to the health path: acceptance still
+	// runs its full flow and never increments the probe count.
+	svc := service.New(fake)
+	before := fake.Pings
+	if _, _, err := svc.Accept(ctx, request()); err != nil {
+		t.Fatalf("accept after ping failure: %v", err)
+	}
+	if fake.Pings != before {
+		t.Fatalf("accept probed storage: pings %d -> %d", before, fake.Pings)
+	}
+}

@@ -6,18 +6,20 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Bob-xisuke/orb-scheduler-core/internal/service"
-	"github.com/Bob-xisuke/orb-scheduler-core/internal/store"
 )
 
-// NewRouter wires the public HTTP surface: health and the placements API. Every
-// entry keeps the error shape described in README.md.
-func NewRouter(st *store.Store) *gin.Engine {
+// NewRouter wires the public HTTP surface: health and the placements API.
+// It depends only on the service.Store contract, so the same entry point
+// serves the SQLite-backed production store and an in-memory double; the
+// router never opens storage, probes beyond Ping, or closes it. Every
+// error keeps the error shape described in README.md.
+func NewRouter(st service.Store) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
 
 	router.GET("/healthz", func(c *gin.Context) {
-		if err := st.Ping(); err != nil {
+		if err := st.Ping(c.Request.Context()); err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"code": "storage_unavailable", "message": "database is not available"}})
 			return
 		}
